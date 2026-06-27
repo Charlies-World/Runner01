@@ -1,0 +1,94 @@
+name: Process Print Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        required: true
+        default: Charlies-World/PrintImages01
+      software_repo:
+        required: true
+        default: Charlies-World/Software
+      input_folder:
+        required: true
+        default: image-pipeline/inbox/gizmo-adventure/logos/test-batch
+      direction_path:
+        required: true
+        default: direction-white-clean.json
+      pipeline_root:
+        required: true
+        default: image-pipeline
+      generate_test_images:
+        required: true
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+
+permissions:
+  contents: read
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout runner
+        uses: actions/checkout@v4
+
+      - name: Checkout software
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.software_repo }}
+          path: Software
+
+      - name: Checkout print images
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.source_repo }}
+          path: PrintImages01
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r Software/requirements.txt
+
+      - name: Prepare test images when folder is empty
+        run: |
+          mkdir -p "PrintImages01/${{ inputs.input_folder }}"
+          count=$(find "PrintImages01/${{ inputs.input_folder }}" -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) | wc -l | tr -d ' ')
+          if [ "$count" = "0" ] && [ "${{ inputs.generate_test_images }}" = "true" ]; then
+            python - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw
+          folder = Path('PrintImages01/${{ inputs.input_folder }}')
+          folder.mkdir(parents=True, exist_ok=True)
+          for i, bg in enumerate([(255,255,255),(246,246,246),(235,235,235)], 1):
+              im = Image.new('RGB', (800, 800), bg)
+              d = ImageDraw.Draw(im)
+              d.ellipse((180,160,620,600), fill=(25,25,25))
+              d.rectangle((360,210,440,660), fill=(255,255,255))
+              d.text((290,705), f'Gizmo test {i}', fill=(0,0,0))
+              im.save(folder / f'gizmo-test-{i}.jpg', quality=95)
+          PY
+          fi
+
+      - name: Run image processor
+        run: |
+          python Software/softstrange_image_editor.py repo-process \
+            --repo-root PrintImages01 \
+            --input-folder "${{ inputs.input_folder }}" \
+            --direction "../Software/${{ inputs.direction_path }}" \
+            --pipeline-root "${{ inputs.pipeline_root }}"
+
+      - name: Show outputs
+        if: always()
+        run: |
+          find "PrintImages01/${{ inputs.pipeline_root }}" -maxdepth 6 -type f | sort | head -300
+
+      - name: Upload pipeline output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: print-image-pipeline-output
+          path: PrintImages01/${{ inputs.pipeline_root }}
+          if-no-files-found: warn
