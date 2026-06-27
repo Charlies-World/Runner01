@@ -1,0 +1,64 @@
+name: Process Print Images And Commit
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_folder:
+        required: true
+        default: image-pipeline/inbox/gizmo-adventure/logos/test-batch
+      generate_test_images:
+        required: true
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+
+permissions:
+  contents: read
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Charlies-World/Software
+          path: Software
+      - uses: actions/checkout@v4
+        with:
+          repository: Charlies-World/PrintImages01
+          path: PrintImages01
+          token: ${{ secrets.CHARLIES_WORLD_PAT }}
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r Software/requirements.txt
+          mkdir -p "PrintImages01/${{ inputs.input_folder }}"
+          count=$(find "PrintImages01/${{ inputs.input_folder }}" -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) | wc -l | tr -d ' ')
+          if [ "$count" = "0" ] && [ "${{ inputs.generate_test_images }}" = "true" ]; then
+            python - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw
+          folder=Path('PrintImages01/${{ inputs.input_folder }}')
+          folder.mkdir(parents=True, exist_ok=True)
+          for i,bg in enumerate([(255,255,255),(246,246,246),(235,235,235)],1):
+              im=Image.new('RGB',(800,800),bg)
+              d=ImageDraw.Draw(im)
+              d.ellipse((180,160,620,600),fill=(25,25,25))
+              d.rectangle((360,210,440,660),fill=(255,255,255))
+              d.text((290,705),f'Gizmo test {i}',fill=(0,0,0))
+              im.save(folder/f'gizmo-test-{i}.jpg',quality=95)
+          PY
+          fi
+          python Software/softstrange_image_editor.py repo-process --repo-root PrintImages01 --input-folder "${{ inputs.input_folder }}" --direction "../Software/direction-white-clean.json" --pipeline-root image-pipeline
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: print-image-pipeline-output
+          path: PrintImages01/image-pipeline
+      - working-directory: PrintImages01
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add image-pipeline
+          git diff --cached --quiet || (git commit -m "Process image batch [skip image-pipeline]" && git push)
